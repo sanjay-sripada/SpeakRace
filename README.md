@@ -1,36 +1,48 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SpeakRace
 
-## Getting Started
+Read aloud with AI. Keep the car moving. Build speaking confidence.
 
-First, run the development server:
+## Quick start
 
 ```bash
+cd Documents/Work/SpeakRace
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+**Use Chrome or Edge** and allow the microphone. The MVP uses the browser Web Speech API (TTS + recognition) — no API keys required.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## How it works
 
-## Learn More
+1. Pick a passage on the home screen
+2. Press **Start Race** — AI reads aloud, mic listens
+3. Read along — the car advances on matched words
+4. Errors / long pauses → car **stops** (red light) + coach tip
+5. Say the word correctly → race resumes
+6. Finish → Speaking Score + AI coach summary
 
-To learn more about Next.js, take a look at the following resources:
+## Speaking Score weights
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Metric | Weight |
+|--------|--------|
+| Pronunciation | 35% |
+| Reading Accuracy | 30% |
+| Pace | 15% |
+| Fluency | 10% |
+| Expression | 10% |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Stack
 
-## Deploy on Vercel
+- Next.js (App Router) + Tailwind CSS
+- Web Speech Synthesis (AI voice)
+- Web Speech Recognition (your voice)
+- Client-side word alignment + scoring
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Next (Phase 2)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Whisper / OpenAI Realtime for better accuracy
+- Adaptive AI speed
+- Shadow reading mode
+- Themes (rocket, train, turtle)
+- Progress history + streaks

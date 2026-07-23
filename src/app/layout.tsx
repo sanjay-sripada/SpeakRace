@@ -17,6 +17,10 @@ export const metadata: Metadata = {
   title: "SpeakRace — Read aloud. Build confidence.",
   description:
     "Keep the car moving as you read with AI. Speaking scores for pronunciation, accuracy, pace, fluency, and expression.",
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+    shortcut: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({

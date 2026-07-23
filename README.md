@@ -15,12 +15,14 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## How it works
 
-1. Pick a passage on the home screen
+1. Pick a built-in passage **or upload your own file** (`.txt`, `.md`, `.pdf`, `.csv`) / paste text
 2. Press **Start Race** — AI reads aloud, mic listens
 3. Read along — the car advances on matched words
 4. Errors / long pauses → car **stops** (red light) + coach tip
 5. Say the word correctly → race resumes
 6. Finish → Speaking Score + AI coach summary
+
+Uploaded files are truncated to the first **150 words** per race so sessions stay focused.
 
 ## Speaking Score weights
 

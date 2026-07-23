@@ -1,7 +1,6 @@
-import { RaceScreen } from "@/components/RaceScreen";
-import { getPassage, PASSAGES } from "@/lib/passages";
+import { RaceLoader } from "@/components/RaceLoader";
+import { PASSAGES } from "@/lib/passages";
 import Link from "next/link";
-import { notFound } from "next/navigation";
 
 type PageProps = {
   searchParams: Promise<{ passage?: string }>;
@@ -10,8 +9,6 @@ type PageProps = {
 export default async function RacePage({ searchParams }: PageProps) {
   const params = await searchParams;
   const id = params.passage ?? PASSAGES[0].id;
-  const passage = getPassage(id);
-  if (!passage) notFound();
 
   return (
     <main className="relative flex-1 px-4 py-8 sm:px-8 sm:py-10">
@@ -28,7 +25,7 @@ export default async function RacePage({ searchParams }: PageProps) {
         </span>
       </div>
       <div className="relative">
-        <RaceScreen passage={passage} />
+        <RaceLoader passageId={id} />
       </div>
     </main>
   );

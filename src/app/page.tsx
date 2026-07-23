@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { UploadTrack } from "@/components/UploadTrack";
 import { PASSAGES } from "@/lib/passages";
 
 const LEVEL_COLOR = {
@@ -40,10 +41,15 @@ export default function HomePage() {
           >
             Start First Race
           </Link>
+          <Link
+            href="/#upload"
+            className="rounded-full border border-white/15 px-8 py-3.5 text-sm font-semibold uppercase tracking-wider text-white/80 transition hover:border-amber-300/40 hover:text-amber-200"
+          >
+            Upload Your File
+          </Link>
           <p className="text-sm text-white/40">Chrome recommended · Mic required</p>
         </div>
 
-        {/* Mini preview track */}
         <div className="mt-14 max-w-xl">
           <div className="relative h-14 overflow-hidden rounded-xl bg-[#14181f] ring-1 ring-white/10">
             <div
@@ -63,13 +69,22 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="relative border-t border-white/10 bg-[#10141a]/80 px-5 py-12 backdrop-blur sm:px-8">
+      <section
+        id="upload"
+        className="relative border-t border-white/10 bg-[#10141a]/80 px-5 py-12 backdrop-blur sm:px-8"
+      >
+        <div className="mx-auto max-w-5xl">
+          <UploadTrack />
+        </div>
+      </section>
+
+      <section className="relative border-t border-white/10 px-5 py-12 sm:px-8">
         <div className="mx-auto max-w-5xl">
           <h2 className="font-[family-name:var(--font-display)] text-3xl tracking-wide text-white">
             Choose your track
           </h2>
           <p className="mt-2 text-white/50">
-            Pick a passage. Match the AI. Finish with a Speaking Score.
+            Pick a built-in passage — or upload your own above.
           </p>
 
           <ul className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

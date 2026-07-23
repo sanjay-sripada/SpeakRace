@@ -3,6 +3,28 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
+const MAX_AUDIO_BYTES = 5 * 1024 * 1024;
+const MAX_REQUESTS_PER_WINDOW = 20;
+const RATE_WINDOW_MS = 60_000;
+
+const requestLog = new Map<string, number[]>();
+
+function getClientIp(request: Request): string {
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0]?.trim() || "unknown";
+  return "local";
+}
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const windowStart = now - RATE_WINDOW_MS;
+  const hits = (requestLog.get(ip) ?? []).filter((t) => t > windowStart);
+  if (hits.length >= MAX_REQUESTS_PER_WINDOW) return true;
+  hits.push(now);
+  requestLog.set(ip, hits);
+  return false;
+}
+
 export async function GET() {
   return NextResponse.json({
     available: Boolean(process.env.OPENAI_API_KEY),
@@ -12,9 +34,14 @@ export async function GET() {
 export async function POST(request: Request) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
+    return NextResponse.json({ error: "Transcription unavailable." }, { status: 503 });
+  }
+
+  const ip = getClientIp(request);
+  if (isRateLimited(ip)) {
     return NextResponse.json(
-      { error: "Whisper is not configured. Add OPENAI_API_KEY to .env.local." },
-      { status: 503 },
+      { error: "Too many transcription requests. Try again shortly." },
+      { status: 429 },
     );
   }
 
@@ -24,6 +51,13 @@ export async function POST(request: Request) {
 
   if (!(audio instanceof File) || audio.size === 0) {
     return NextResponse.json({ error: "Missing audio chunk." }, { status: 400 });
+  }
+
+  if (audio.size > MAX_AUDIO_BYTES) {
+    return NextResponse.json(
+      { error: "Audio chunk too large." },
+      { status: 413 },
+    );
   }
 
   try {
@@ -37,9 +71,7 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({ text: transcription.text ?? "" });
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Transcription failed.";
-    return NextResponse.json({ error: message }, { status: 502 });
+  } catch {
+    return NextResponse.json({ error: "Transcription failed." }, { status: 502 });
   }
 }

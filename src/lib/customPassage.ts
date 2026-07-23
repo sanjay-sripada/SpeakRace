@@ -52,7 +52,32 @@ export function loadCustomPassage(): CustomPassagePayload | null {
   const raw = sessionStorage.getItem(CUSTOM_PASSAGE_KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as CustomPassagePayload;
+    const parsed = JSON.parse(raw) as Partial<CustomPassagePayload>;
+    if (!parsed.text || typeof parsed.text !== "string") return null;
+
+    const prepared = prepareRaceText(parsed.text);
+    if (!prepared.text) return null;
+
+    const targetWpm = Number(parsed.targetWpm);
+    const safeWpm =
+      Number.isFinite(targetWpm) && targetWpm >= 80 && targetWpm <= 180
+        ? Math.round(targetWpm)
+        : estimateTargetWpm(prepared.wordCount);
+
+    return {
+      title:
+        typeof parsed.title === "string" && parsed.title.trim()
+          ? parsed.title.trim().slice(0, 120)
+          : "My Upload",
+      text: prepared.text,
+      targetWpm: safeWpm,
+      sourceName:
+        typeof parsed.sourceName === "string"
+          ? parsed.sourceName.slice(0, 200)
+          : "upload",
+      truncated: prepared.truncated,
+      wordCount: prepared.wordCount,
+    };
   } catch {
     return null;
   }

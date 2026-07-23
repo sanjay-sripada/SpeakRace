@@ -1,0 +1,8 @@
+{
+  "baseUrl": "http://localhost:3456",
+  "checks": [
+    { "method": "GET", "path": "/", "expectStatus": 200 },
+    { "method": "GET", "path": "/race", "expectStatus": 200 },
+    { "method": "GET", "path": "/api/transcribe", "expectStatus": 200 }
+  ]
+}

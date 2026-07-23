@@ -49,7 +49,7 @@ export function useRaceEngine(passage: Passage) {
   const [transcript, setTranscript] = useState("");
   const [userWpm, setUserWpm] = useState(0);
   const [session, setSession] = useState<SessionStats | null>(null);
-  const [support] = useState(() => speechSupported());
+  const [support, setSupport] = useState({ tts: false, stt: false });
   const [recognitionMode, setRecognitionMode] =
     useState<RecognitionMode>("browser");
   const [grammarApplied, setGrammarApplied] = useState(false);
@@ -72,6 +72,10 @@ export function useRaceEngine(passage: Passage) {
   statusRef.current = status;
   indexRef.current = currentIndex;
   stopsRef.current = stops;
+
+  useEffect(() => {
+    setSupport(speechSupported());
+  }, []);
 
   useEffect(() => {
     void fetchWhisperAvailability().then(setWhisperStatus);

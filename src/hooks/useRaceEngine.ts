@@ -3,13 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Passage, SessionStats, WordResult } from "@/lib/types";
 import {
+  alignTranscriptChunk,
+  nextAlignAction,
+  tokensFromAlternatives,
+} from "@/lib/alignment";
+import {
   buildSessionStats,
   computeScores,
   emptyScores,
   normalizeWord,
   tokenize,
-  wordSimilarity,
 } from "@/lib/scoring";
+import { applyPassageGrammar } from "@/lib/speechGrammar";
 import {
   getSpeechRecognitionCtor,
   pauseSpeaking,
@@ -20,9 +25,15 @@ import {
   wpmToRate,
   type SpeechRecognitionLike,
 } from "@/lib/speech";
+import {
+  WhisperRefiner,
+  fetchWhisperAvailability,
+  type WhisperAvailability,
+} from "@/lib/whisperClient";
 
 const PAUSE_MS = 2500;
-const MATCH_THRESHOLD = 0.72;
+
+export type RecognitionMode = "browser" | "whisper-enhanced";
 
 export function useRaceEngine(passage: Passage) {
   const wordsRef = useRef<string[]>(tokenize(passage.text));
@@ -39,6 +50,12 @@ export function useRaceEngine(passage: Passage) {
   const [userWpm, setUserWpm] = useState(0);
   const [session, setSession] = useState<SessionStats | null>(null);
   const [support] = useState(() => speechSupported());
+  const [recognitionMode, setRecognitionMode] =
+    useState<RecognitionMode>("browser");
+  const [grammarApplied, setGrammarApplied] = useState(false);
+  const [whisperStatus, setWhisperStatus] = useState<WhisperAvailability>({
+    available: false,
+  });
 
   const startedAtRef = useRef<number | null>(null);
   const pauseEventsRef = useRef(0);
@@ -46,12 +63,19 @@ export function useRaceEngine(passage: Passage) {
   const statusRef = useRef(status);
   const indexRef = useRef(0);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const whisperRefinerRef = useRef<WhisperRefiner | null>(null);
   const heardBufferRef = useRef<string[]>([]);
   const consumedHeardRef = useRef(0);
   const intentionalStopRef = useRef(false);
+  const stopsRef = useRef(0);
 
   statusRef.current = status;
   indexRef.current = currentIndex;
+  stopsRef.current = stops;
+
+  useEffect(() => {
+    void fetchWhisperAvailability().then(setWhisperStatus);
+  }, []);
 
   const scores = computeScores({
     words,
@@ -72,12 +96,54 @@ export function useRaceEngine(passage: Passage) {
     setUserWpm(Math.round(spoken / elapsedMin));
   }, []);
 
+  const finishRace = useCallback(() => {
+    intentionalStopRef.current = true;
+    stopSpeaking();
+    recognitionRef.current?.stop();
+    whisperRefinerRef.current?.stop();
+    whisperRefinerRef.current = null;
+    setStatus("complete");
+
+    const durationMs = startedAtRef.current
+      ? Date.now() - startedAtRef.current
+      : 0;
+    const finalWpm =
+      durationMs > 0
+        ? Math.round(wordsRef.current.length / (durationMs / 60000))
+        : passage.targetWpm;
+    setUserWpm(finalWpm);
+
+    setWords((latest) => {
+      const finalized = latest.map((w) =>
+        w.state === "pending" || w.state === "current"
+          ? { ...w, state: "correct" as const }
+          : w,
+      );
+      setSession(
+        buildSessionStats({
+          words: finalized,
+          stops: stopsRef.current,
+          userWpm: finalWpm,
+          targetWpm: passage.targetWpm,
+          durationMs,
+          pauseEvents: pauseEventsRef.current,
+        }),
+      );
+      return finalized;
+    });
+  }, [passage.targetWpm]);
+
   const redLight = useCallback(
     (message: string, markError = true) => {
-      if (statusRef.current === "complete" || statusRef.current === "idle") return;
+      if (statusRef.current === "complete" || statusRef.current === "idle") {
+        return;
+      }
       pauseSpeaking();
       setStatus("stopped");
-      setStops((s) => s + 1);
+      setStops((s) => {
+        stopsRef.current = s + 1;
+        return s + 1;
+      });
       setCoachMessage(message);
       if (markError) {
         setWords((prev) => {
@@ -114,80 +180,114 @@ export function useRaceEngine(passage: Passage) {
       updateWpm();
 
       if (nextIndex >= wordsRef.current.length) {
-        intentionalStopRef.current = true;
-        stopSpeaking();
-        recognitionRef.current?.stop();
-        setStatus("complete");
-        const durationMs = startedAtRef.current
-          ? Date.now() - startedAtRef.current
-          : 0;
-        const finalWpm =
-          durationMs > 0
-            ? Math.round(wordsRef.current.length / (durationMs / 60000))
-            : passage.targetWpm;
-        setUserWpm(finalWpm);
-        setWords((latest) => {
-          const finalized = latest.map((w) =>
-            w.state === "pending" || w.state === "current"
-              ? { ...w, state: "correct" as const }
-              : w,
-          );
-          setSession(
-            buildSessionStats({
-              words: finalized,
-              stops,
-              userWpm: finalWpm,
-              targetWpm: passage.targetWpm,
-              durationMs,
-              pauseEvents: pauseEventsRef.current,
-            }),
-          );
-          return finalized;
-        });
+        finishRace();
       } else if (statusRef.current === "stopped") {
         setStatus("racing");
         resumeSpeaking();
       }
     },
-    [passage.targetWpm, stops, updateWpm],
+    [finishRace, updateWpm],
   );
 
-  const tryMatchHeard = useCallback(() => {
-    if (statusRef.current !== "racing" && statusRef.current !== "stopped") {
-      return;
-    }
-    const expectedList = wordsRef.current;
-    let i = indexRef.current;
-    const buffer = heardBufferRef.current.slice(consumedHeardRef.current);
+  const processHeardBuffer = useCallback(() => {
+    while (
+      statusRef.current === "racing" ||
+      statusRef.current === "stopped"
+    ) {
+      const action = nextAlignAction(
+        wordsRef.current,
+        indexRef.current,
+        heardBufferRef.current,
+        consumedHeardRef.current,
+      );
 
-    for (let b = 0; b < buffer.length; b++) {
-      const heard = buffer[b];
-      const expected = expectedList[i];
-      if (!expected) break;
-      const sim = wordSimilarity(expected, heard);
-      if (sim >= MATCH_THRESHOLD) {
+      if (action.type === "advance") {
         consumedHeardRef.current += 1;
         if (statusRef.current === "stopped") {
           setStatus("racing");
           resumeSpeaking();
           setCoachMessage(null);
         }
-        advanceWord(heard);
-        i = indexRef.current;
-      } else if (sim < 0.4 && heard.length >= 2) {
-        // Clear wrong attempt from buffer and red-light
+        advanceWord(action.spoken);
+      } else if (action.type === "skip_noise") {
         consumedHeardRef.current += 1;
+      } else if (action.type === "wrong") {
+        consumedHeardRef.current += 1;
+        const expected = wordsRef.current[indexRef.current];
         redLight(
           `Red light! "${expected}" wasn't clear. Say it once more to continue.`,
           true,
         );
         break;
       } else {
-        // ambiguous — wait for more audio
         break;
       }
     }
   }, [advanceWord, redLight]);
+
+  const ingestHeardTokens = useCallback(
+    (tokens: string[]) => {
+      if (tokens.length === 0) return;
+      if (statusRef.current !== "racing" && statusRef.current !== "stopped") {
+        return;
+      }
+      heardBufferRef.current.push(...tokens);
+      processHeardBuffer();
+    },
+    [processHeardBuffer],
+  );
+
+  const applyWhisperTokens = useCallback(
+    (tokens: string[]) => {
+      if (statusRef.current !== "racing" && statusRef.current !== "stopped") {
+        return;
+      }
+
+      const matches = alignTranscriptChunk(
+        wordsRef.current,
+        indexRef.current,
+        tokens,
+      );
+
+      for (const match of matches) {
+        if (match.expectedIndex !== indexRef.current) break;
+        if (statusRef.current === "stopped") {
+          setStatus("racing");
+          resumeSpeaking();
+          setCoachMessage(null);
+        }
+        advanceWord(match.spoken);
+      }
+    },
+    [advanceWord],
+  );
+
+  const stopWhisperRefiner = useCallback(() => {
+    whisperRefinerRef.current?.stop();
+    whisperRefinerRef.current = null;
+  }, []);
+
+  const startWhisperRefiner = useCallback(async () => {
+    if (!whisperStatus.available) return false;
+
+    stopWhisperRefiner();
+    const refiner = new WhisperRefiner({
+      prompt: passage.text,
+      onTokens: applyWhisperTokens,
+      onError: (message) => {
+        if (statusRef.current === "racing" || statusRef.current === "stopped") {
+          setCoachMessage(message);
+        }
+      },
+    });
+
+    const started = await refiner.start();
+    if (started) {
+      whisperRefinerRef.current = refiner;
+      setRecognitionMode("whisper-enhanced");
+    }
+    return started;
+  }, [applyWhisperTokens, passage.text, stopWhisperRefiner, whisperStatus.available]);
 
   const startRecognition = useCallback(() => {
     const Ctor = getSpeechRecognitionCtor();
@@ -198,7 +298,13 @@ export function useRaceEngine(passage: Passage) {
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "en-US";
-    recognition.maxAlternatives = 1;
+    recognition.maxAlternatives = 5;
+
+    const grammarOk = applyPassageGrammar(recognition, wordsRef.current);
+    setGrammarApplied(grammarOk);
+    if (!whisperStatus.available) {
+      setRecognitionMode("browser");
+    }
 
     recognition.onresult = (event) => {
       let interim = "";
@@ -213,27 +319,21 @@ export function useRaceEngine(passage: Passage) {
       if (display) setTranscript(display);
 
       if (finalChunk.trim()) {
-        const parts = finalChunk
-          .trim()
-          .split(/\s+/)
-          .map(normalizeWord)
-          .filter(Boolean);
-        heardBufferRef.current.push(...parts);
-        tryMatchHeard();
-      } else if (interim.trim()) {
-        // Soft-match interim for snappier car movement
-        const last = normalizeWord(interim.trim().split(/\s+/).pop() || "");
-        const expected = wordsRef.current[indexRef.current];
-        if (
-          last &&
-          expected &&
-          wordSimilarity(expected, last) >= MATCH_THRESHOLD &&
-          (statusRef.current === "racing" || statusRef.current === "stopped")
-        ) {
-          // Don't consume from buffer; wait for final — but nudge coach
-          if (statusRef.current === "stopped") {
-            setCoachMessage("Nice — keep going!");
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const res = event.results[i];
+          if (!res.isFinal) continue;
+
+          const alternatives: string[] = [];
+          for (let j = 0; j < res.length; j++) {
+            alternatives.push(res[j]?.transcript ?? "");
           }
+
+          const tokens = tokensFromAlternatives(
+            alternatives.length > 0 ? alternatives : [finalChunk.trim()],
+            wordsRef.current,
+            indexRef.current,
+          );
+          ingestHeardTokens(tokens);
         }
       }
     };
@@ -263,11 +363,13 @@ export function useRaceEngine(passage: Passage) {
     } catch {
       /* ignore */
     }
-  }, [tryMatchHeard]);
+  }, [ingestHeardTokens, whisperStatus.available]);
 
-  const startRace = useCallback(() => {
+  const startRace = useCallback(async () => {
     stopSpeaking();
     recognitionRef.current?.abort();
+    stopWhisperRefiner();
+
     wordsRef.current = tokenize(passage.text);
     const initial: WordResult[] = wordsRef.current.map((expected, i) => ({
       expected,
@@ -277,6 +379,7 @@ export function useRaceEngine(passage: Passage) {
     setCurrentIndex(0);
     indexRef.current = 0;
     setStops(0);
+    stopsRef.current = 0;
     setCoachMessage(null);
     setTranscript("");
     setUserWpm(0);
@@ -290,13 +393,20 @@ export function useRaceEngine(passage: Passage) {
 
     startRecognition();
 
+    if (whisperStatus.available) {
+      await startWhisperRefiner();
+    }
+
     speakText(passage.text, {
       rate: wpmToRate(passage.targetWpm),
-      onEnd: () => {
-        // If user hasn't finished, keep listening until they catch up or timeout via pause watcher
-      },
     });
-  }, [passage, startRecognition]);
+  }, [
+    passage,
+    startRecognition,
+    startWhisperRefiner,
+    stopWhisperRefiner,
+    whisperStatus.available,
+  ]);
 
   const skipWord = useCallback(() => {
     const i = indexRef.current;
@@ -317,6 +427,7 @@ export function useRaceEngine(passage: Passage) {
       intentionalStopRef.current = true;
       stopSpeaking();
       recognitionRef.current?.stop();
+      stopWhisperRefiner();
       setStatus("complete");
       const durationMs = startedAtRef.current
         ? Date.now() - startedAtRef.current
@@ -330,7 +441,7 @@ export function useRaceEngine(passage: Passage) {
         setSession(
           buildSessionStats({
             words: latest,
-            stops,
+            stops: stopsRef.current,
             userWpm: finalWpm,
             targetWpm: passage.targetWpm,
             durationMs,
@@ -340,29 +451,34 @@ export function useRaceEngine(passage: Passage) {
         return latest;
       });
     }
-  }, [passage.targetWpm, stops]);
+  }, [finishRace, passage.targetWpm, stopWhisperRefiner]);
 
   const resetRace = useCallback(() => {
     intentionalStopRef.current = true;
     stopSpeaking();
     recognitionRef.current?.abort();
     recognitionRef.current = null;
+    stopWhisperRefiner();
     setStatus("idle");
     setCurrentIndex(0);
     setStops(0);
+    stopsRef.current = 0;
     setCoachMessage(null);
     setTranscript("");
     setUserWpm(0);
     setSession(null);
+    setGrammarApplied(false);
+    if (!whisperStatus.available) {
+      setRecognitionMode("browser");
+    }
     setWords(
       tokenize(passage.text).map((expected, i) => ({
         expected,
         state: i === 0 ? "current" : "pending",
       })),
     );
-  }, [passage.text]);
+  }, [passage.text, stopWhisperRefiner, whisperStatus.available]);
 
-  // Pause watchdog
   useEffect(() => {
     if (status !== "racing") return;
     const id = window.setInterval(() => {
@@ -381,16 +497,19 @@ export function useRaceEngine(passage: Passage) {
     return () => window.clearInterval(id);
   }, [status, redLight]);
 
-  // Cleanup
+  useEffect(() => {
+    whisperRefinerRef.current?.updatePrompt(passage.text);
+  }, [passage.text]);
+
   useEffect(() => {
     return () => {
       intentionalStopRef.current = true;
       stopSpeaking();
       recognitionRef.current?.abort();
+      stopWhisperRefiner();
     };
-  }, []);
+  }, [stopWhisperRefiner]);
 
-  // Re-sync words when passage changes
   useEffect(() => {
     wordsRef.current = tokenize(passage.text);
     resetRace();
@@ -409,6 +528,9 @@ export function useRaceEngine(passage: Passage) {
     userWpm,
     targetWpm: passage.targetWpm,
     session,
+    recognitionMode,
+    grammarApplied,
+    whisperAvailable: whisperStatus.available,
     startRace,
     skipWord,
     resetRace,

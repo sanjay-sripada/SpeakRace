@@ -1,8 +1,14 @@
+type SpeechGrammarListLike = {
+  addFromString: (grammar: string, weight: number) => void;
+  length: number;
+};
+
 export type SpeechRecognitionLike = {
   continuous: boolean;
   interimResults: boolean;
   lang: string;
   maxAlternatives?: number;
+  grammars?: SpeechGrammarListLike;
   onresult: ((event: SpeechRecognitionEventLike) => void) | null;
   onerror: ((event: { error: string }) => void) | null;
   onend: (() => void) | null;

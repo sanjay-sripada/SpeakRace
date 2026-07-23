@@ -36,8 +36,37 @@ export function RaceScreen({ passage }: RaceScreenProps) {
             {passage.title}
           </h1>
         </div>
-        <p className="text-sm text-white/45">Target {passage.targetWpm} WPM</p>
+        <div className="text-right">
+          <p className="text-sm text-white/45">Target {passage.targetWpm} WPM</p>
+          {race.status !== "idle" && (
+            <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.14em] text-teal-300/80">
+              {race.recognitionMode === "whisper-enhanced"
+                ? "Whisper + smart match"
+                : race.grammarApplied
+                  ? "Passage-tuned browser STT"
+                  : "Browser speech match"}
+            </p>
+          )}
+        </div>
       </header>
+
+      {race.whisperAvailable && race.status === "idle" && (
+        <div className="rounded-2xl bg-teal-400/10 px-4 py-3 text-sm text-teal-100 ring-1 ring-teal-300/20">
+          Whisper enhancement is active — races use OpenAI transcription for
+          higher accuracy.
+        </div>
+      )}
+
+      {!race.whisperAvailable && race.status === "idle" && (
+        <div className="rounded-2xl bg-white/5 px-4 py-3 text-sm text-white/55 ring-1 ring-white/10">
+          Using improved passage-aware matching. Add{" "}
+          <code className="rounded bg-black/30 px-1.5 py-0.5 text-teal-200">
+            OPENAI_API_KEY
+          </code>{" "}
+          to <code className="rounded bg-black/30 px-1.5 py-0.5 text-teal-200">.env.local</code>{" "}
+          for Whisper-level accuracy.
+        </div>
+      )}
 
       {(!race.support.stt || !race.support.tts) && (
         <div className="rounded-2xl bg-amber-400/10 px-4 py-3 text-sm text-amber-100 ring-1 ring-amber-300/25">

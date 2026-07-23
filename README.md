@@ -11,7 +11,28 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-**Use Chrome or Edge** and allow the microphone. The MVP uses the browser Web Speech API (TTS + recognition) — no API keys required.
+**Use Chrome or Edge** and allow the microphone.
+
+## Speech recognition
+
+SpeakRace uses two layers of speech accuracy:
+
+### Always on (no API key)
+
+- **Passage vocabulary hints** — browser STT is biased toward words in your text
+- **Phonetic matching** — tolerates accent/pronunciation differences (`beautiful` ≈ `beautifool`)
+- **Smarter alignment** — ignores stray STT tokens and matches against the expected script
+
+### Whisper enhanced (optional, recommended)
+
+Add your OpenAI key for much higher transcription accuracy during races:
+
+```bash
+cp .env.example .env.local
+# edit .env.local and set OPENAI_API_KEY=sk-...
+```
+
+Restart the dev server. Races will show **Whisper + smart match** and send short mic chunks to `whisper-1` with your passage as context.
 
 ## How it works
 
@@ -38,12 +59,12 @@ Uploaded files are truncated to the first **150 words** per race so sessions sta
 
 - Next.js (App Router) + Tailwind CSS
 - Web Speech Synthesis (AI voice)
-- Web Speech Recognition (your voice)
+- Web Speech Recognition + passage grammar + phonetic alignment
+- Optional OpenAI Whisper (`/api/transcribe`)
 - Client-side word alignment + scoring
 
 ## Next (Phase 2)
 
-- Whisper / OpenAI Realtime for better accuracy
 - Adaptive AI speed
 - Shadow reading mode
 - Themes (rocket, train, turtle)
